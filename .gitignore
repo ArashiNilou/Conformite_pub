@@ -134,6 +134,8 @@ Thumbs.db
 outputs/
 RAPTOR_db_NEW/
 RAPTOR_db_OLD/
+RAPTOR_db/
+src/RAPTOR_db/
 converted_images/
 stats/
 jpg/
