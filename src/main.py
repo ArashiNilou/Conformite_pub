@@ -19,6 +19,7 @@ from utils.output_saver import save_output
 import json
 from datetime import datetime
 from utils.raw_text_extractor import RawTextExtractor
+from utils.company_verifier import check_company_in_text
 
 class CustomCallbackHandler(BaseCallbackHandler):
     """Handler personnalisé pour logger les événements de l'agent"""
@@ -29,6 +30,7 @@ class CustomCallbackHandler(BaseCallbackHandler):
         self.steps = {
             "vision_analysis": "",
             "consistency_check": "",
+            "product_logo_consistency": "",
             "dates_verification": "",
             "legislation": "",
             "clarifications": "",
@@ -64,6 +66,8 @@ class CustomCallbackHandler(BaseCallbackHandler):
                         self.token_counter.set_current_step("vision_analysis")
                     elif self.current_action == "verify_consistency":
                         self.token_counter.set_current_step("consistency_check")
+                    elif self.current_action == "verify_product_logo_consistency":
+                        self.token_counter.set_current_step("product_logo_consistency")
                     elif self.current_action == "verify_dates":
                         self.token_counter.set_current_step("dates_verification")
                     elif self.current_action == "search_legislation":
@@ -104,6 +108,9 @@ class CustomCallbackHandler(BaseCallbackHandler):
                 elif self.current_action == "verify_consistency":
                     print("💾 Sauvegarde de la vérification de cohérence...")
                     self.steps["consistency_check"] = response
+                elif self.current_action == "verify_product_logo_consistency":
+                    print("💾 Sauvegarde de la vérification de cohérence produit/logo...")
+                    self.steps["product_logo_consistency"] = response
                 elif self.current_action == "verify_dates":
                     print("💾 Sauvegarde de la vérification des dates...")
                     self.steps["dates_verification"] = response
@@ -253,6 +260,28 @@ async def analyze_image(image_path: str, agent = None) -> None:
         print(f"❌ Erreur lors de l'exécution de l'agent: {str(e)}")
         response = f"Erreur d'analyse: {str(e)}"
     
+    # Vérification automatique du nom d'entreprise via API Sirene
+    raw_text = callback_handler.steps.get("raw_text", "")
+    company_verification = check_company_in_text(raw_text)
+    if company_verification.get("detected"):
+        print(f"\n🔎 Vérification du nom d'entreprise : {company_verification}")
+    else:
+        print("\n🔎 Aucun nom d'entreprise détecté dans le texte brut.")
+
+    # Injection de l'alerte dans la description pour le LLM si nom incohérent
+    description = callback_handler.steps.get("vision_analysis", "")
+    if company_verification.get("detected") and not company_verification.get("valid"):
+        alert = f"\n\n**ALERTE CONFORMITÉ ENTREPRISE** : Le nom d'entreprise détecté '{company_verification['name']}' n'existe pas dans la base officielle Sirene. Suggestions : {', '.join(company_verification.get('suggestions', []) or [])}"
+        description = description + alert
+        callback_handler.steps["vision_analysis"] = description
+
+    # Injection directe dans la compliance_analysis pour garantir la visibilité
+    compliance = callback_handler.steps.get("compliance_analysis", "")
+    if company_verification.get("detected") and not company_verification.get("valid"):
+        compliance_alert = f"ALERTE CONFORMITÉ ENTREPRISE : Le nom d'entreprise détecté '{company_verification['name']}' n'existe pas dans la base officielle Sirene. Suggestions : {', '.join(company_verification.get('suggestions', []) or [])}\n"
+        compliance = compliance_alert + compliance
+        callback_handler.steps["compliance_analysis"] = compliance
+    
     end_time = datetime.now()
     duration = end_time - start_time
     print(f"⏱️  Fin de l'analyse : {end_time.strftime('%H:%M:%S')} (durée: {duration})")
@@ -264,12 +293,14 @@ async def analyze_image(image_path: str, agent = None) -> None:
             "steps": {
                 "vision_analysis": callback_handler.steps["vision_analysis"],
                 "consistency_check": callback_handler.steps["consistency_check"],
+                "product_logo_consistency": callback_handler.steps["product_logo_consistency"],
                 "dates_verification": callback_handler.steps["dates_verification"],
                 "legislation": callback_handler.steps["legislation"],
                 "clarifications": callback_handler.steps["clarifications"],
                 "compliance_analysis": callback_handler.steps["compliance_analysis"],
                 "raw_text": callback_handler.steps["raw_text"]
             },
+            "company_verification": company_verification,
             "final_response": response
         })
         print(f"💾 Résultat sauvegardé : {output_path}")

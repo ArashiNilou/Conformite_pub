@@ -141,3 +141,61 @@ jpg/
 .pytest_cache/
 # data/  # Décommentez si les données ne doivent pas être versionnées
 # tests_images/ # Décommentez si les images de test ne doivent pas être versionnées
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.env.*
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Dossiers spécifiques au projet
+temp_uploads/
+outputs/
+logs/
+
+# Dossiers et fichiers système
+.DS_Store
+Thumbs.db
+.directory
+desktop.ini
+
+# Environnements de développement
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Fichiers de configuration locaux
+config.local.json
+*.local.env
+
+# Logs
+*.log

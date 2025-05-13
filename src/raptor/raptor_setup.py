@@ -6,7 +6,7 @@ from models.ai_models import AIModels
 from prompts.prompts import search_query
 from time import sleep
 from tenacity import retry, stop_after_attempt, wait_exponential
-import fitz  # PyMuPDF
+import fitz
 from typing import Dict, Any
 
 class RaptorSetup:
@@ -15,7 +15,7 @@ class RaptorSetup:
         print("\n🔧 Initialisation de ChromaDB...")
         try:
             # Initialisation de la base de données
-            self.client = chromadb.PersistentClient(path="/home/dino.lakisic/Bureau/legalvision-ReAct/RAPTOR_db")
+            self.client = chromadb.PersistentClient(path="./RAPTOR_db")
             print("✅ Client ChromaDB créé avec succès")
             
             # Vérifier si la collection existe déjà
@@ -23,7 +23,7 @@ class RaptorSetup:
             print(f"📚 Collections existantes : {collection_names}")
             
             # Vérifier si notre collection existe
-            if "legislation_PUB" in [c for c in collection_names]:
+            if "legislation_PUB" in [c.name for c in collection_names]:
                 print("📚 Collection 'legislation_PUB' trouvée")
                 self.collection = self.client.get_collection("legislation_PUB")
             else:

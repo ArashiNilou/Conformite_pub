@@ -27,7 +27,8 @@ class OutputSaver:
             "legislation": "",
             "clarifications": "",
             "compliance_analysis": "",
-            "extracted_text": ""
+            "extracted_text": "",
+            "product_logo_consistency": ""  # Nouveau champ pour les incohérences produit/logo
         }
     
     def _generate_filename(self, image_path: str) -> str:
@@ -61,7 +62,8 @@ class OutputSaver:
             "legislation": "",
             "clarifications": "",
             "compliance_analysis": "",
-            "extracted_text": ""
+            "extracted_text": "",
+            "product_logo_consistency": ""
         }
     
     def save_vision_result(self, result: str) -> None:
@@ -156,6 +158,11 @@ class OutputSaver:
                 
             print(f"\n💾 Vérification des dates sauvegardée séparément dans : {output_path}")
     
+    def save_product_logo_consistency(self, result: str) -> None:
+        """Sauvegarde le résultat de la vérification de cohérence produit/logo"""
+        self.current_analysis["product_logo_consistency"] = result
+        self._save_current_analysis()
+    
     def is_analysis_in_progress(self) -> bool:
         """
         Vérifie si une analyse est actuellement en cours
@@ -212,66 +219,68 @@ def make_json_serializable(obj):
 
 def save_output(input_path: str, analysis_data: Dict[str, Any]) -> str:
     """
-    Sauvegarde les résultats d'analyse dans un fichier JSON
+    Sauvegarde les résultats d'analyse en JSON
     
     Args:
-        input_path: Chemin du fichier analysé
-        analysis_data: Données d'analyse à sauvegarder
+        input_path: Chemin de l'image ou du PDF analysé
+        analysis_data: Données d'analyse
         
     Returns:
-        Chemin du fichier de sortie
+        str: Chemin du fichier de sortie
     """
-    try:
-        # Formater et préparer les données
-        input_file = Path(input_path)
-        base_output_dir = Path("outputs")
+    input_file = Path(input_path)
+    
+    # Créer le répertoire de sortie
+    base_output_dir = Path("outputs")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    source_dir = base_output_dir / input_file.stem
+    source_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Créer le nom du fichier de sortie
+    output_path = source_dir / f"analyse_{timestamp}.json"
+    
+    # Fonction pour rendre les données sérialisables en JSON
+    def make_json_serializable(data):
+        if data is None:
+            return ""
+        if isinstance(data, (str, int, float, bool)):
+            return data
+        if isinstance(data, (list, tuple)):
+            return [make_json_serializable(item) for item in data]
+        if isinstance(data, dict):
+            return {k: make_json_serializable(v) for k, v in data.items()}
+        return str(data)
+    
+    # Nettoyer les données pour JSON
+    clean_data = {
+        "input_file": str(input_file.absolute()),
+        "converted_file": analysis_data.get("converted_file"),
+        "timestamp": analysis_data.get("timestamp"),
+        "steps": {
+            "vision_analysis": make_json_serializable(analysis_data.get("steps", {}).get("vision_analysis", "")),
+            "consistency_check": make_json_serializable(analysis_data.get("steps", {}).get("consistency_check", "")),
+            "product_logo_consistency": make_json_serializable(analysis_data.get("steps", {}).get("product_logo_consistency", "")),
+            "dates_verification": make_json_serializable(analysis_data.get("steps", {}).get("dates_verification", "")),
+            "legislation": make_json_serializable(analysis_data.get("steps", {}).get("legislation", "")),
+            "clarifications": make_json_serializable(analysis_data.get("steps", {}).get("clarifications", "")),
+            "compliance_analysis": make_json_serializable(analysis_data.get("steps", {}).get("compliance_analysis", "")),
+            "text_extraction": make_json_serializable(analysis_data.get("steps", {}).get("text_extraction", "")),
+            "raw_text": make_json_serializable(analysis_data.get("steps", {}).get("raw_text", ""))
+        },
+        "final_response": make_json_serializable(analysis_data.get("final_response", "")),
+        "extracted_text": make_json_serializable(analysis_data.get("extracted_text", "")),
+        "company_verification": make_json_serializable(analysis_data.get("company_verification", {}))
+    }
+    
+    # Sauvegarder en JSON
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(clean_data, f, ensure_ascii=False, indent=2)
         
-        # Créer un nom de fichier unique
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"analyse_{input_file.stem}_{timestamp}.json"
-        
-        # Organiser les fichiers par date
-        today = datetime.now().strftime("%Y%m%d")
-        source_dir = base_output_dir / today / input_file.stem
-        source_dir.mkdir(parents=True, exist_ok=True)
-        
-        output_path = source_dir / filename
-        
-        # Nettoyer les données pour JSON
-        clean_data = {
-            "input_file": str(input_file.absolute()),
-            "converted_file": analysis_data.get("converted_file"),
-            "timestamp": analysis_data.get("timestamp"),
-            "steps": {
-                "vision_analysis": make_json_serializable(analysis_data.get("steps", {}).get("vision_analysis", "")),
-                "consistency_check": make_json_serializable(analysis_data.get("steps", {}).get("consistency_check", "")),
-                "dates_verification": make_json_serializable(analysis_data.get("steps", {}).get("dates_verification", "")),
-                "legislation": make_json_serializable(analysis_data.get("steps", {}).get("legislation", "")),
-                "clarifications": make_json_serializable(analysis_data.get("steps", {}).get("clarifications", "")),
-                "compliance_analysis": make_json_serializable(analysis_data.get("steps", {}).get("compliance_analysis", "")),
-                "text_extraction": make_json_serializable(analysis_data.get("steps", {}).get("text_extraction", "")),
-                "raw_text": make_json_serializable(analysis_data.get("steps", {}).get("raw_text", ""))
-            },
-            "final_response": make_json_serializable(analysis_data.get("final_response", "")),
-            "extracted_text": make_json_serializable(analysis_data.get("extracted_text", ""))
-        }
-        
-        # Sauvegarder en JSON
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(clean_data, f, ensure_ascii=False, indent=2)
+    # Copier l'image convertie si elle existe
+    if clean_data.get("converted_file"):
+        image_path = Path(clean_data["converted_file"])
+        if image_path.exists():
+            image_output = source_dir / f"image_{timestamp}{image_path.suffix}"
+            shutil.copy2(image_path, image_output)
             
-        # Copier l'image convertie si elle existe
-        if clean_data.get("converted_file"):
-            image_path = Path(clean_data["converted_file"])
-            if image_path.exists():
-                image_output = source_dir / f"image_{timestamp}{image_path.suffix}"
-                shutil.copy2(image_path, image_output)
-                
-        return str(output_path.relative_to(base_output_dir.parent))
-        
-    except Exception as e:
-        print(f"❌ Erreur lors de la sauvegarde : {str(e)}")
-        print("📝 Détails de l'erreur :")
-        import traceback
-        print(traceback.format_exc())
-        raise 
+    return str(output_path.relative_to(base_output_dir.parent)) 
