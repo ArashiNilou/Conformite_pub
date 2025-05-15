@@ -58,6 +58,14 @@ class LogoProductMatcher:
             "poulet fermier": "volaille",
             "fermier de janzé": "volaille"
         }
+        
+        # Liste des catégories de produits non transformés exemptés de mentions légales comme mangerbouger.fr
+        self.non_transformed_products = {
+            "viandes fraîches": ["viande fraîche", "viande crue", "viande non transformée"],
+            "poissons frais": ["poisson frais", "poisson cru", "poisson non transformé", "noix de saint-jacques", "coquille saint-jacques"],
+            "fruits frais": ["fruit", "fruit frais", "pomme", "poire", "banane", "orange", "citron", "fraise", "framboise", "raisin", "melon", "pastèque", "ananas"],
+            "légumes frais": ["légume", "légume frais", "carotte", "pomme de terre", "salade", "tomate", "concombre", "poivron", "oignon", "ail"]
+        }
     
     def is_logo_compatible_with_product(self, logo: str, product: str) -> bool:
         """
@@ -112,11 +120,33 @@ class LogoProductMatcher:
         
         # Associer les produits spécifiques à leurs catégories générales
         extended_products = products.copy()
+        product_categories = {}  # Dictionnaire pour stocker le mapping produit -> catégorie
+        
         for product in products:
             product_norm = product.lower().strip()
             if product_norm in self.specific_product_mapping:
                 # Ajouter sa catégorie générale
                 extended_products.append(self.specific_product_mapping[product_norm])
+                product_categories[product_norm] = self.specific_product_mapping[product_norm]
+            
+            # Détection explicite des produits bovins
+            if "bœuf" in product_norm or "boeuf" in product_norm or "bovin" in product_norm:
+                product_categories[product_norm] = "bœuf"
+            
+            # Détection explicite des produits de volaille
+            if "poulet" in product_norm or "volaille" in product_norm or "dinde" in product_norm:
+                product_categories[product_norm] = "volaille"
+            
+            # Détection explicite des produits porcins
+            if "porc" in product_norm or "cochon" in product_norm:
+                product_categories[product_norm] = "porc"
+                
+            # Cas spécifique: "langue de boeuf"
+            if "langue" in product_norm and ("bœuf" in product_norm or "boeuf" in product_norm or "bovin" in product_norm):
+                product_categories[product_norm] = "bœuf"
+            elif "langue" in product_norm and "porc" not in product_norm and "cochon" not in product_norm:
+                # Par défaut, si "langue" est mentionnée sans précision, on la considère comme bovine
+                product_categories[product_norm] = "bœuf"
         
         # Maintenant, vérifier les incohérences entre chaque logo et tous les produits
         for logo in logos:
@@ -124,19 +154,42 @@ class LogoProductMatcher:
             if logo_norm not in self.logo_product_mapping:
                 continue  # Ignorer les logos inconnus
                 
+            # Déterminer la catégorie du logo
+            logo_category = None
+            if "porc" in logo_norm:
+                logo_category = "porc"
+            elif "bœuf" in logo_norm or "boeuf" in logo_norm:
+                logo_category = "bœuf"
+            elif "volaille" in logo_norm:
+                logo_category = "volaille"
+            
             incompatible_products = []
             for product in extended_products:
                 product_norm = product.lower().strip()
                 
-                # Cas spécial: "langue bovine" ou "langue" doit être incompatible avec "porc français"
-                if ("langue" in product_norm or "viande bovine" in product_norm) and "porc" in logo_norm:
+                # Cas spécial 1: Langue de boeuf avec logo porc
+                if ("langue" in product_norm and (
+                    "bœuf" in product_norm or "boeuf" in product_norm or "bovin" in product_norm)) and "porc" in logo_norm:
                     incompatible_products.append(product)
                     continue
                 
-                # Cas spécial: "filet mignon" doit être incompatible avec "bœuf français"
-                if "filet mignon" in product_norm and "bœuf" in logo_norm:
+                # Cas spécial 2: Langue (par défaut considérée comme bovine) avec logo porc
+                if "langue" in product_norm and "porc" not in product_norm and "porc" in logo_norm:
                     incompatible_products.append(product)
                     continue
+                
+                # Cas spécial 3: Si le produit a une catégorie identifiée qui ne correspond pas au logo
+                if product_norm in product_categories:
+                    product_cat = product_categories[product_norm]
+                    if logo_category and product_cat != logo_category and logo_category != "tous":
+                        # Vérification spécifique pour logo Porc avec produit bœuf
+                        if "porc" in logo_norm and product_cat == "bœuf":
+                            incompatible_products.append(product)
+                            continue
+                        # Vérification spécifique pour logo Bœuf avec produit porc
+                        if ("bœuf" in logo_norm or "boeuf" in logo_norm) and product_cat == "porc":
+                            incompatible_products.append(product)
+                            continue
                 
                 # Vérification générale de compatibilité
                 if not self.is_logo_compatible_with_product(logo, product):
@@ -300,3 +353,59 @@ class LogoProductMatcher:
                         found_logos.add("volaille française")
         
         return list(found_logos)
+    
+    def is_non_transformed_product(self, products: List[str]) -> bool:
+        """
+        Détermine si les produits listés sont des produits non transformés exemptés de la mention mangerbouger.fr
+        (viande fraîche, poisson frais, fruits et légumes frais, etc.)
+        Args:
+            products: Liste des produits à vérifier
+        Returns:
+            bool: True si tous les produits sont non transformés, False sinon
+        """
+        import re
+        # Si aucun produit n'est fourni, fallback : regarder dans le texte complet
+        if not products:
+            return False
+        text = " ".join(products).lower()
+        # Marqueurs explicites de produits transformés
+        transformed_markers = [
+            "transformé", "préparé", "cuisiné", "appertisé", "conserve", "plat préparé",
+            "sauté", "mijoté", "surgelé", "cuit", "pané", "mariné"
+        ]
+        if any(marker in text for marker in transformed_markers):
+            print("[LOGO_PRODUCT_MATCHER] Produit transformé détecté via marqueur.")
+            return False
+        # Synonymes et variantes pour produits non transformés
+        non_transformed_patterns = [
+            r"ananas(\s+frais)?",
+            r"noix\s+de\s+saint[ -]?jacques",
+            r"coquille(s)?\s+saint[ -]?jacques",
+            r"poisson(s)?\s+frais",
+            r"poisson(s)?\s+cru(s)?",
+            r"fruit(s)?\s+frais",
+            r"légume(s)?\s+frais",
+            r"viande(s)?\s+fraîche(s)?",
+            r"viande(s)?\s+crue(s)?",
+            r"viande(s)?\s+non\s+transformée(s)?",
+            r"pomme", r"poire", r"banane", r"orange", r"citron", r"fraise", r"framboise", r"raisin", r"melon", r"pastèque",
+            r"carotte", r"pomme\s+de\s+terre", r"salade", r"tomate", r"concombre", r"poivron", r"oignon", r"ail"
+        ]
+        for pattern in non_transformed_patterns:
+            if re.search(pattern, text):
+                print(f"[LOGO_PRODUCT_MATCHER] Produit non transformé détecté via pattern : {pattern}")
+                return True
+        # Vérifications spécifiques par type de produit (comme avant)
+        if "viande" in text and not any(processed in text for processed in ["charcuterie", "jambon", "saucisse", "saucisson", "pâté"]):
+            print("[LOGO_PRODUCT_MATCHER] Viande fraîche détectée.")
+            return True
+        if "poisson" in text and not any(processed in text for processed in ["fumé", "pané", "conserve"]):
+            print("[LOGO_PRODUCT_MATCHER] Poisson frais détecté.")
+            return True
+        meat_keywords = ["bœuf", "bovin", "boeuf", "veau", "agneau", "volaille", "poulet", "dinde", "canard"]
+        processed_keywords = ["préparé", "transformé", "cuisiné", "charcuterie"]
+        if any(meat in text for meat in meat_keywords) and not any(processed in text for processed in processed_keywords):
+            print("[LOGO_PRODUCT_MATCHER] Produit de boucherie non transformé détecté.")
+            return True
+        print("[LOGO_PRODUCT_MATCHER] Aucun produit non transformé détecté.")
+        return False

@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 import cv2
 import numpy as np
 from PIL import Image, ImageEnhance
+import traceback
 
 # Configuration du logger
 logging.basicConfig(
@@ -213,57 +214,59 @@ class RawTextExtractor:
     
     def extract_raw_text(self, image_path: str, method: str = "auto") -> Dict[str, str]:
         """
-        Extrait le texte brut en utilisant la méthode spécifiée ou toutes les méthodes disponibles
+        Extrait le texte brut d'une image avec différentes méthodes
         
         Args:
-            image_path: Chemin vers l'image
-            method: Méthode d'extraction ("tesseract", "easyocr", "auto")
+            image_path: Chemin de l'image à analyser
+            method: Méthode d'extraction ('tesseract', 'easyocr', 'auto')
             
         Returns:
-            Dict[str, str]: Dictionnaire des résultats par méthode
+            Dict[str, str]: Texte extrait par chaque méthode
         """
+        print(f"\n📝 Extraction du texte brut : {image_path}")
+        
+        # Vérifier le chemin de l'image
+        image_path_obj = Path(image_path)
+        if not image_path_obj.exists():
+            raise FileNotFoundError(f"Image non trouvée : {image_path}")
+            
+        methods = []
+        if method == "auto":
+            # Utiliser Tesseract et EasyOCR
+            methods = ["tesseract", "easyocr"]
+        else:
+            # Utiliser la méthode spécifiée
+            methods = [method]
+            
         results = {}
         
-        # Vérifier que l'image existe
-        if not os.path.exists(image_path):
-            logger.error(f"Image non trouvée: {image_path}")
-            return results
-        
-        # Sélectionner les méthodes à utiliser
-        methods_to_use = []
-        if method == "auto":
-            # Utiliser toutes les méthodes disponibles
-            if "tesseract" in self.available_engines:
-                methods_to_use.append("tesseract")
-            if "easyocr" in self.available_engines:
-                methods_to_use.append("easyocr")
-        else:
-            # Utiliser uniquement la méthode spécifiée
-            if method in self.available_engines and self.available_engines[method]:
-                methods_to_use.append(method)
-        
-        # Si aucune méthode n'est disponible, retourner un dictionnaire vide
-        if not methods_to_use:
-            logger.warning(f"Aucune méthode d'extraction disponible")
+        # Ouvrir l'image
+        try:
+            image = Image.open(image_path)
+        except Exception as e:
+            print(f"❌ Erreur lors de l'ouverture de l'image : {e}")
             return results
             
-        # Extraire le texte avec chaque méthode
-        for method in methods_to_use:
+        # Analyser avec chaque méthode demandée
+        for m in methods:
             try:
-                if method == "tesseract":
-                    text = self.extract_with_tesseract(image_path)
-                elif method == "easyocr":
-                    text = self.extract_with_easyocr(image_path)
+                if m == "tesseract":
+                    extracted_text = self.extract_with_tesseract(image_path)
+                elif m == "easyocr":
+                    extracted_text = self.extract_with_easyocr(image_path)
                 else:
-                    logger.warning(f"Méthode d'extraction inconnue: {method}")
+                    print(f"⚠️ Méthode inconnue : {m}")
                     continue
-                
-                results[method] = text
-                
+                    
+                if extracted_text:
+                    results[m] = extracted_text
+                    print(f"✅ Texte extrait avec {m} : {len(extracted_text)} caractères")
+                else:
+                    print(f"⚠️ Aucun texte extrait avec {m}")
             except Exception as e:
-                logger.error(f"Erreur lors de l'extraction avec {method}: {str(e)}")
-                results[method] = f"ERREUR: {str(e)}"
-        
+                print(f"❌ Erreur lors de l'extraction avec {m} : {e}")
+                traceback.print_exc()
+                
         return results
 
 # Fonction principale pour l'exécution en ligne de commande

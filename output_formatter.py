@@ -2,6 +2,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from src.utils.logo_product_matcher import LogoProductMatcher
 
 class OutputFormatter:
     """
@@ -13,6 +14,7 @@ class OutputFormatter:
         self.output_dir = Path("outputs")
         self.reports_dir = Path("rapports")
         self.reports_dir.mkdir(parents=True, exist_ok=True)
+        self.logo_product_matcher = LogoProductMatcher()
     
     def format_json_to_html(self, json_path):
         """
@@ -106,8 +108,11 @@ class OutputFormatter:
         if "basse résolution" in raw_text.lower() or "illisible" in raw_text.lower():
             problemes.append("Image partiellement illisible ou en basse résolution")
         
+        # Vérifier si les produits sont non transformés avant d'ajouter l'absence de mangerbouger.fr aux problèmes
         if "mangerbouger.fr" in legislation.lower() and "mangerbouger.fr" not in vision_result.lower():
-            problemes.append("Absence de mention www.mangerbouger.fr")
+            products = self.logo_product_matcher.extract_products_from_text(vision_result)
+            if not self.logo_product_matcher.is_non_transformed_product(products):
+                problemes.append("Absence de mention www.mangerbouger.fr")
         
         if "astérisque" in compliance.lower() and "sans renvoi" in compliance.lower():
             problemes.append("Astérisques sans renvoi")
@@ -533,11 +538,16 @@ class OutputFormatter:
             str: HTML des recommandations
         """
         recommandations_html = ""
+        vision_result = data.get("vision_analysis", "")
         
         # Générer des recommandations en fonction des problèmes
         for probleme in problemes:
             if "mangerbouger.fr" in probleme.lower():
-                recommandations_html += "<li><strong>Légal (URGENT) :</strong> Ajouter la mention www.mangerbouger.fr qui doit occuper au moins 7% de la surface publicitaire.</li>\n"
+                # Vérifier si les produits détectés sont non transformés
+                # Dans ce cas, ne pas ajouter la recommandation
+                products = self.logo_product_matcher.extract_products_from_text(vision_result)
+                if not self.logo_product_matcher.is_non_transformed_product(products):
+                    recommandations_html += "<li><strong>Légal (URGENT) :</strong> Ajouter la mention www.mangerbouger.fr qui doit occuper au moins 7% de la surface publicitaire.</li>\n"
             elif "résolution" in probleme.lower() or "illisible" in probleme.lower():
                 recommandations_html += "<li><strong>Qualité :</strong> Améliorer la résolution de l'image, particulièrement pour les mentions légales.</li>\n"
             elif "astérisque" in probleme.lower():

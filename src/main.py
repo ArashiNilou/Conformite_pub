@@ -20,10 +20,23 @@ import json
 from datetime import datetime
 from utils.raw_text_extractor import RawTextExtractor
 from utils.company_verifier import check_company_in_text
+import traceback
 
 class CustomCallbackHandler(BaseCallbackHandler):
     """Handler personnalisé pour logger les événements de l'agent"""
-    
+
+    # Mapping centralisé action → étape
+    ACTION_TO_STEP = {
+        "analyze_vision": "vision_analysis",
+        "verify_consistency": "consistency_check",
+        "verify_product_logo_consistency": "product_logo_consistency",
+        "verify_dates": "dates_verification",
+        "search_legislation": "legislation",
+        "get_clarifications": "clarifications",
+        "analyze_compliance": "compliance_analysis",
+        "extract_raw_text": "raw_text"
+    }
+
     def __init__(self) -> None:
         super().__init__([], [])
         print("\n🔄 Initialisation du CustomCallbackHandler")
@@ -40,11 +53,13 @@ class CustomCallbackHandler(BaseCallbackHandler):
         print("✅ Steps initialisés :", self.steps.keys())
         self.current_action = None
         self.token_counter = None  # Sera défini plus tard
-        
+        # Désactiver la sauvegarde intermédiaire des résultats
+        self.save_intermediate_results = False
+
     def set_token_counter(self, token_counter: TokenCounter) -> None:
         """Définir le compteur de tokens pour ce handler."""
         self.token_counter = token_counter
-        
+
     def on_event_start(
         self,
         event_type: CBEventType,
@@ -59,28 +74,12 @@ class CustomCallbackHandler(BaseCallbackHandler):
             if hasattr(tool_metadata, "name"):
                 self.current_action = tool_metadata.name
                 print(f"✅ Action courante mise à jour: {self.current_action}")
-                
-                # Définir l'étape courante dans le compteur de tokens
+
+                # Définir l'étape courante dans le compteur de tokens via mapping
                 if self.token_counter:
-                    if self.current_action == "analyze_vision":
-                        self.token_counter.set_current_step("vision_analysis")
-                    elif self.current_action == "verify_consistency":
-                        self.token_counter.set_current_step("consistency_check")
-                    elif self.current_action == "verify_product_logo_consistency":
-                        self.token_counter.set_current_step("product_logo_consistency")
-                    elif self.current_action == "verify_dates":
-                        self.token_counter.set_current_step("dates_verification")
-                    elif self.current_action == "search_legislation":
-                        self.token_counter.set_current_step("legislation_search")
-                    elif self.current_action == "get_clarifications":
-                        self.token_counter.set_current_step("clarifications")
-                    elif self.current_action == "analyze_compliance":
-                        self.token_counter.set_current_step("compliance_analysis")
-                    elif self.current_action == "extract_raw_text":
-                        self.token_counter.set_current_step("raw_text_extraction")
-                    else:
-                        self.token_counter.set_current_step("other")
-        
+                    step = self.ACTION_TO_STEP.get(self.current_action, "other")
+                    self.token_counter.set_current_step(step)
+
         return event_id
 
     def on_event_end(
@@ -96,37 +95,17 @@ class CustomCallbackHandler(BaseCallbackHandler):
                 print(f"\n{'='*50}")
                 print(f"📝 Traitement de la réponse pour l'action: {self.current_action}")
                 response = str(payload["function_call_response"])
-                
+
                 # Supprimer le préfixe "assistant:" s'il est présent
                 if response.startswith("assistant:"):
                     response = response[len("assistant:"):].strip()
-                
-                # Stocker la réponse selon l'action
-                if self.current_action == "analyze_vision":
-                    print("💾 Sauvegarde de l'analyse visuelle...")
-                    self.steps["vision_analysis"] = response
-                elif self.current_action == "verify_consistency":
-                    print("💾 Sauvegarde de la vérification de cohérence...")
-                    self.steps["consistency_check"] = response
-                elif self.current_action == "verify_product_logo_consistency":
-                    print("💾 Sauvegarde de la vérification de cohérence produit/logo...")
-                    self.steps["product_logo_consistency"] = response
-                elif self.current_action == "verify_dates":
-                    print("💾 Sauvegarde de la vérification des dates...")
-                    self.steps["dates_verification"] = response
-                elif self.current_action == "search_legislation":
-                    print("💾 Sauvegarde de la législation...")
-                    self.steps["legislation"] = response
-                elif self.current_action == "get_clarifications":
-                    print("💾 Sauvegarde des clarifications...")
-                    self.steps["clarifications"] = response
-                elif self.current_action == "analyze_compliance":
-                    print("💾 Sauvegarde de l'analyse de conformité...")
-                    self.steps["compliance_analysis"] = response
-                elif self.current_action == "extract_raw_text":
-                    print("💾 Sauvegarde du texte brut...")
-                    self.steps["raw_text"] = response
-                
+
+                # Stocker la réponse selon l'action via mapping
+                step = self.ACTION_TO_STEP.get(self.current_action)
+                if step and step in self.steps:
+                    print(f"💾 Sauvegarde de la réponse pour l'étape: {step}...")
+                    self.steps[step] = response
+
                 print(f"{'='*50}\n")
 
     def start_trace(self, trace_id: Optional[str] = None) -> None:
@@ -221,9 +200,15 @@ async def analyze_image(image_path: str, agent = None) -> None:
             callback_manager=callback_manager,
             verbose=True
         )
+    else:
+        callback_handler = next((handler for handler in agent.callback_manager.handlers if isinstance(handler, CustomCallbackHandler)), None)
+        tools = agent.tools
 
     start_time = datetime.now()
     print(f"⏱️  Début de l'analyse : {start_time.strftime('%H:%M:%S')}")
+    
+    # Variable pour stocker les résultats
+    final_output_path = None
     
     # Exécuter l'analyse
     try:
@@ -256,39 +241,18 @@ async def analyze_image(image_path: str, agent = None) -> None:
             # En dernier recours, convertir en chaîne de caractères
             response = str(raw_response)
             print(f"⚠️ Conversion de l'objet Response en chaîne - type original: {type(raw_response)}")
-    except Exception as e:
-        print(f"❌ Erreur lors de l'exécution de l'agent: {str(e)}")
-        response = f"Erreur d'analyse: {str(e)}"
+        
+        # Vérification automatique du nom d'entreprise via API Sirene
+        raw_text = callback_handler.steps.get("raw_text", "")
+        company_verification = check_company_in_text(raw_text)
+        if company_verification.get("detected"):
+            print(f"\n🔎 Vérification du nom d'entreprise : {company_verification}")
+        else:
+            print("\n🔎 Aucun nom d'entreprise détecté dans le texte brut.")
     
-    # Vérification automatique du nom d'entreprise via API Sirene
-    raw_text = callback_handler.steps.get("raw_text", "")
-    company_verification = check_company_in_text(raw_text)
-    if company_verification.get("detected"):
-        print(f"\n🔎 Vérification du nom d'entreprise : {company_verification}")
-    else:
-        print("\n🔎 Aucun nom d'entreprise détecté dans le texte brut.")
-
-    # Injection de l'alerte dans la description pour le LLM si nom incohérent
-    description = callback_handler.steps.get("vision_analysis", "")
-    if company_verification.get("detected") and not company_verification.get("valid"):
-        alert = f"\n\n**ALERTE CONFORMITÉ ENTREPRISE** : Le nom d'entreprise détecté '{company_verification['name']}' n'existe pas dans la base officielle Sirene. Suggestions : {', '.join(company_verification.get('suggestions', []) or [])}"
-        description = description + alert
-        callback_handler.steps["vision_analysis"] = description
-
-    # Injection directe dans la compliance_analysis pour garantir la visibilité
-    compliance = callback_handler.steps.get("compliance_analysis", "")
-    if company_verification.get("detected") and not company_verification.get("valid"):
-        compliance_alert = f"ALERTE CONFORMITÉ ENTREPRISE : Le nom d'entreprise détecté '{company_verification['name']}' n'existe pas dans la base officielle Sirene. Suggestions : {', '.join(company_verification.get('suggestions', []) or [])}\n"
-        compliance = compliance_alert + compliance
-        callback_handler.steps["compliance_analysis"] = compliance
-    
-    end_time = datetime.now()
-    duration = end_time - start_time
-    print(f"⏱️  Fin de l'analyse : {end_time.strftime('%H:%M:%S')} (durée: {duration})")
-    
-    # Sauvegarder le résultat
-    try:
-        output_path = save_output(path, {
+        # Attendre UNIQUEMENT la fin de toutes les étapes pour sauvegarder le résultat final
+        final_output_path = save_output(path, {
+            "converted_file": path if path != image_path else None,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "steps": {
                 "vision_analysis": callback_handler.steps["vision_analysis"],
@@ -303,11 +267,17 @@ async def analyze_image(image_path: str, agent = None) -> None:
             "company_verification": company_verification,
             "final_response": response
         })
-        print(f"💾 Résultat sauvegardé : {output_path}")
+        
+        end_time = datetime.now()
+        duration = end_time - start_time
+        print(f"⏱️  Fin de l'analyse : {end_time.strftime('%H:%M:%S')} (durée: {duration})")
+        print(f"🏁 Analyse terminée")
+        
     except Exception as e:
-        print(f"❌ Erreur lors de la sauvegarde du résultat : {e}")
+        print(f"❌ Erreur lors de l'analyse de l'image : {str(e)}")
+        traceback.print_exc()
     
-    print("🏁 Analyse terminée")
+    return final_output_path
 
 def validate_image_path(path: str) -> str:
     """
@@ -504,24 +474,8 @@ def extract_raw_text(files: List[str], method: str = "auto") -> None:
                 print(text if text else "[Aucun texte extrait]")
                 print("-" * 50)
                 
-                # Sauvegarder le résultat
-                try:
-                    # Créer le chemin de sortie
-                    output_dir = Path("outputs") / "raw_text"
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    # Nom du fichier de sortie
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    output_file = output_dir / f"{Path(file_path).stem}_{method_name}_{timestamp}.txt"
-                    
-                    # Écrire le texte extrait
-                    with open(output_file, "w", encoding="utf-8") as f:
-                        f.write(text)
-                    
-                    print(f"💾 Texte sauvegardé: {output_file}")
-                    
-                except Exception as e:
-                    print(f"❌ Erreur lors de la sauvegarde du texte: {str(e)}")
+                # Ne pas sauvegarder les résultats intermédiaires en fichiers distincts
+                print(f"💾 Texte extrait avec {method_name} (affiché mais non sauvegardé)")
             
         except Exception as e:
             print(f"❌ Erreur lors de l'extraction de texte: {str(e)}")

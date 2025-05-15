@@ -13,6 +13,7 @@ from utils.logo_product_matcher import LogoProductMatcher
 import os
 from pathlib import Path
 import re
+import calendar
 
 class Tools:
     """Collection des outils disponibles pour l'analyse de publicité"""
@@ -565,82 +566,131 @@ TEXTE BRUT DÉJÀ EXTRAIT:
             
         return result
 
-    def verify_dates(self, vision_result: str = None) -> str:
+    def verify_dates(self, text: str, **kwargs) -> dict:
         """
-        Vérifie la cohérence des dates mentionnées dans la publicité
+        Vérifie les dates mentionnées dans le texte et leur cohérence.
+        Détecte les incohérences entre jours de la semaine et dates.
         
         Args:
-            vision_result: Résultat de l'analyse visuelle (optionnel)
+            text: Le texte à analyser
             
         Returns:
-            str: Rapport de vérification des dates
+            dict: Résultat de l'analyse des dates
         """
-        print("\n📅 Vérification de la cohérence des dates...")
+        print("🔍 Vérification des dates dans le texte")
         
-        if not vision_result and not self.vision_result:
-            raise ValueError("L'analyse visuelle doit être effectuée d'abord")
-            
-        vision_content = vision_result if vision_result else self.vision_result
+        # Récupérer la date actuelle
+        current_date = datetime.now()
         
-        # Obtenir la date actuelle au format français
-        current_date = datetime.now().strftime("%d/%m/%Y")
+        # Année en cours pour vérification des dates
+        current_year = 2025
         
-        prompt = f"""VÉRIFICATION DE LA COHÉRENCE DES DATES
-
-Date actuelle : {current_date}
-
-CONTENU À ANALYSER :
-{vision_content}
-
-INSTRUCTIONS :
-1. Extraire toutes les dates et jours de la semaine mentionnés dans la publicité
-2. Pour chaque date au format JJ/MM/AAAA ou similaire :
-   - Vérifier si elle correspond bien au jour de la semaine mentionné (ex: "vendredi 08/03/2025")
-   - Vérifier si la date est future ou passée par rapport à aujourd'hui ({current_date})
-   - Vérifier la cohérence entre les périodes (dates de début et de fin)
-   - Vérifier si les jours fériés sont correctement mentionnés
-3. Pour chaque jour de la semaine mentionné sans date précise :
-   - Indiquer les dates possibles dans un futur proche (prochaines occurrences)
-
-TEXTE BRUT (pour référence) :
-{self.raw_text if hasattr(self, 'raw_text') and self.raw_text else "Non disponible"}
-
-FORMAT DE RÉPONSE :
-DATES IDENTIFIÉES :
-- Date 1 : [format original] => [JJ/MM/AAAA] [jour de la semaine] [future/passée] [cohérente/non cohérente avec le jour mentionné]
-- Date 2 : [format original] => [JJ/MM/AAAA] [jour de la semaine] [future/passée] [cohérente/non cohérente avec le jour mentionné]
-
-PÉRIODES IDENTIFIÉES :
-- Période 1 : Du [date début] au [date fin] => [durée en jours] [cohérente/non cohérente]
-- Période 2 : Du [date début] au [date fin] => [durée en jours] [cohérente/non cohérente]
-
-JOURS DE LA SEMAINE SANS DATE PRÉCISE :
-- [Jour mentionné] => Prochaines occurrences : [dates]
-
-INCOHÉRENCES DÉTECTÉES :
-- [Description précise de chaque incohérence]
-
-RECOMMANDATIONS :
-- [Suggestions pour corriger les incohérences]
-
-VERDICT DE COHÉRENCE TEMPORELLE : [COHÉRENT/NON COHÉRENT/PARTIELLEMENT COHÉRENT]
-"""
+        # Dictionnaire normalisant les jours de la semaine
+        jours_semaine = {
+            'lundi': 0, 'mardi': 1, 'mercredi': 2, 'jeudi': 3, 
+            'vendredi': 4, 'samedi': 5, 'dimanche': 6
+        }
         
-        # Utiliser le LLM pour analyser les dates
-        response = self.llm.complete(prompt)
-        result = str(response)
+        # Jours avec accents
+        jours_semaine_accents = {
+            'lundi': 0, 'mardi': 1, 'mercredi': 2, 'jeudi': 3, 
+            'vendredi': 4, 'samedi': 5, 'dimanche': 6
+        }
         
-        # Supprimer le préfixe "assistant:" s'il est présent
-        if result.startswith("assistant:"):
-            result = result[len("assistant:"):].strip()
+        # Map des nombres en jours
+        map_numero_jour = {
+            0: "lundi", 1: "mardi", 2: "mercredi", 3: "jeudi",
+            4: "vendredi", 5: "samedi", 6: "dimanche"
+        }
+        
+        # --- NOUVELLE LOGIQUE POUR DATES EN TOUTES LETTRES ET PLAGES ---
+        mois_fr = [
+            "janvier", "février", "fevrier", "mars", "avril", "mai", "juin", "juillet", "août", "aout", "septembre", "octobre", "novembre", "décembre", "decembre"
+        ]
+        mois_map = {m: i+1 for i, m in enumerate([
+            "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"
+        ])}
+        mois_map["fevrier"] = 2
+        mois_map["aout"] = 8
+        mois_map["decembre"] = 12
+        
+        # Chercher les jours listés (ex: "vendredi et samedi")
+        jours_regex = r"(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)(?:\s*et\s*(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche))*"
+        jours_matches = re.findall(jours_regex, text, flags=re.IGNORECASE)
+        jours_list = []
+        for match in jours_matches:
+            jours_list.extend([j for j in match if j])
+        jours_list = [j.lower() for j in jours_list if j]
+        
+        # Chercher les dates en toutes lettres (ex: "27 septembre", "28 septembre")
+        date_lettres_regex = r"(\d{1,2})\s*(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)"
+        date_lettres_matches = re.findall(date_lettres_regex, text, flags=re.IGNORECASE)
+        dates_list = []
+        for jour_num, mois in date_lettres_matches:
+            mois_num = mois_map[mois.lower()]
+            dates_list.append((int(jour_num), mois_num, mois))
+        
+        # Si on a autant de jours que de dates, on les associe dans l'ordre
+        couples = []
+        if len(jours_list) == len(dates_list) and len(jours_list) > 0:
+            for i in range(len(jours_list)):
+                couples.append((jours_list[i], dates_list[i]))
+        # Si un seul mois pour plusieurs jours/dates, on fait toutes les combinaisons
+        elif len(jours_list) > 0 and len(dates_list) > 0:
+            for jour in jours_list:
+                for date in dates_list:
+                    couples.append((jour, date))
+        # Sinon, on continue avec la logique classique
+        
+        # Vérifier la cohérence pour chaque couple jour/date
+        date_errors = []
+        for jour, (jour_num, mois_num, mois_nom) in couples:
+            try:
+                date_obj = datetime(current_year, mois_num, jour_num)
+                weekday_num = date_obj.weekday()
+                mentioned_weekday_num = jours_semaine[jour.lower()]
+                if weekday_num != mentioned_weekday_num:
+                    correct_day = map_numero_jour[weekday_num]
+                    date_errors.append({
+                        "date": f"{jour_num} {mois_nom}",
+                        "stated_day": jour,
+                        "correct_day": correct_day,
+                        "description": f"Le {jour} {jour_num} {mois_nom} {current_year} est un {correct_day}, pas un {jour}."
+                    })
+                if date_obj.date() < current_date.date():
+                    date_errors.append({
+                        "date": f"{jour_num} {mois_nom}",
+                        "type": "expired",
+                        "description": f"La date {jour_num} {mois_nom} {current_year} est déjà passée (date actuelle: {current_date.strftime('%d/%m/%Y')})."
+                    })
+            except Exception as e:
+                date_errors.append({
+                    "date": f"{jour_num} {mois_nom}",
+                    "stated_day": jour,
+                    "error": str(e),
+                    "description": f"Erreur d'analyse de date: {str(e)}"
+                })
+        # --- FIN NOUVELLE LOGIQUE ---
+        
+        # Sauvegarder les erreurs pour utilisation ailleurs
+        self.weekday_errors = date_errors
+        
+        # Résultat de l'analyse
+        result = {
+            "dates_found": couples,
+            "weekday_errors": date_errors,
+            "total_errors": len(date_errors)
+        }
+        
+        if date_errors:
+            error_descriptions = "\n".join([f"- {err['description']}" for err in date_errors])
+            result["summary"] = f"⚠️ {len(date_errors)} incohérence(s) détectée(s) dans les dates:\n{error_descriptions}"
+        else:
+            result["summary"] = "✓ Aucune incohérence détectée dans les dates."
         
         # Sauvegarder le résultat
-        # La méthode save_dates_verification n'existe pas encore, nous devons l'ajouter à OutputSaver
-        if hasattr(self.output_saver, 'save_dates_verification'):
-            self.output_saver.save_dates_verification(result)
-        else:
-            # Si la méthode n'existe pas, on utilise save_custom_data ou on affiche un avertissement
-            print("⚠️ La méthode save_dates_verification n'existe pas dans OutputSaver")
+        if hasattr(self, 'output_saver'):
+            self.output_saver.save_output('dates_verification', result)
         
         return result
 
@@ -733,62 +783,153 @@ VERDICT DE COHÉRENCE TEMPORELLE : [COHÉRENT/NON COHÉRENT/PARTIELLEMENT COHÉR
         
         return result
 
-    def analyze_compliance(self) -> str:
+    def analyze_compliance(self, 
+                        vision_result: str = None, 
+                        consistency_result: str = None, 
+                        legislation_result: str = None,
+                        product_logo_analysis: str = None,
+                        dates_verification: dict = None,
+                        raw_text: str = None,
+                        **kwargs) -> str:
         """
-        Analyse finale de la conformité
+        Analyse la conformité de la publicité en fonction des différentes analyses
+        
+        Args:
+            vision_result: Résultat de l'analyse visuelle
+            consistency_result: Résultat de la vérification de cohérence
+            legislation_result: Résultat de la recherche de législation
+            product_logo_analysis: Résultat de l'analyse de cohérence produit/logo
+            dates_verification: Résultat de la vérification des dates (format dictionnaire)
+            raw_text: Texte brut extrait de l'image
+            
         Returns:
-            str: Analyse complète de la conformité
+            str: Rapport de conformité
         """
-        if not self.vision_result or not self.legislation:
-            raise ValueError("Toutes les étapes précédentes doivent être complétées")
-            
-        # Obtenir la date actuelle au format français
-        current_date = datetime.now().strftime("%d/%m/%Y")
         
-        # Vérifier si l'image est de basse qualité ou illisible
-        low_quality_image = False
-        if any(term in self.vision_result.lower() for term in ['basse résolution', 'basse qualité', 'illisible', 'floue', 'pixelisée']):
-            low_quality_image = True
+        # Récupérer les résultats d'analyse précédents si non fournis
+        if not vision_result and hasattr(self, 'vision_result'):
+            vision_result = self.vision_result
             
-        # Ajouter les incohérences produit/logo dans le prompt d'analyse finale
-        product_logo_info = ""
-        product_logo_summary = ""
-        if hasattr(self, 'product_logo_inconsistencies') and self.product_logo_inconsistencies:
-            product_logo_info = "\n\nINCOHÉRENCES PRODUITS/LOGOS DÉTECTÉES :\n"
-            product_logo_summary = "⚠️ INCOHÉRENCES PRODUITS/LOGOS DÉTECTÉES"
-            for i, inconsistency in enumerate(self.product_logo_inconsistencies, 1):
-                product_logo_info += f"{i}. Le logo '{inconsistency['logo']}' n'est pas compatible avec les produits suivants : {', '.join(inconsistency['products'])}\n"
-                product_logo_info += f"   → Catégories autorisées pour ce logo : {', '.join(inconsistency['allowed_categories'])}\n"
-        
-        # Récupérer les erreurs de prix depuis la vérification de cohérence
+        if not consistency_result and hasattr(self, 'consistency_result'):
+            consistency_result = self.consistency_result
+            
+        if not legislation_result and hasattr(self, 'legislation_result'):
+            legislation_result = self.legislation_result
+            
+        if not product_logo_analysis and hasattr(self, 'product_logo_analysis'):
+            product_logo_analysis = self.product_logo_analysis
+            
+        if not dates_verification and hasattr(self, 'weekday_errors'):
+            dates_verification = {
+                "weekday_errors": self.weekday_errors,
+                "total_errors": len(self.weekday_errors) if self.weekday_errors else 0
+            }
+            
+        if not raw_text and hasattr(self, 'raw_text'):
+            raw_text = self.raw_text
+            
+        # Initialiser toutes les variables utilisées dans le prompt pour éviter les erreurs Python
+        date_info = ""
         price_errors_info = ""
-        price_errors_summary = ""
-        if hasattr(self, 'raw_text') and self.raw_text:
-            price_errors = self.check_price_consistency(self.raw_text)
-            if price_errors:
-                price_errors_info = "\n\nERREURS DE PRIX CRITIQUES DÉTECTÉES:\n"
-                price_errors_summary = "⚠️ ERREURS DE PRIX CRITIQUES DÉTECTÉES"
-                for i, error in enumerate(price_errors, 1):
-                    if error["type"] == "prix_supérieur" or error["type"] == "prix_supérieur_avec_réduction":
-                        price_errors_info += f"{i}. ERREUR CRITIQUE: Le prix après réduction ({error['prix_réduit']}€) est SUPÉRIEUR au prix initial ({error['prix_initial']}€) dans '{error['texte_original']}'\n"
-                    elif error["type"] == "calcul_incorrect":
-                        price_errors_info += f"{i}. ERREUR DE CALCUL: Pour une réduction de {error['pourcentage_réduction']}% sur {error['prix_initial']}€, le prix affiché est {error['prix_affiché']}€ alors qu'il devrait être {error['prix_calculé']}€\n"
-                    elif error["type"] == "prix_barré_incohérent":
-                        price_errors_info += f"{i}. ERREUR CRITIQUE: Le prix réduit ({error['prix_réduit']}€) est SUPÉRIEUR au prix barré initial ({error['prix_initial']}€)\n"
-        
-        # Vérifier les erreurs d'orthographe dans les jours de la semaine
         weekday_errors_info = ""
+        price_errors_summary = ""
+        date_errors_summary = ""
         weekday_errors_summary = ""
-        if hasattr(self, 'raw_text') and self.raw_text:
-            weekday_errors = self.check_weekday_spelling(self.raw_text)
-            if weekday_errors:
-                weekday_errors_info = "\n\nERREURS D'ORTHOGRAPHE DES JOURS DE LA SEMAINE DÉTECTÉES:\n"
-                weekday_errors_summary = "⚠️ JOURS DE LA SEMAINE MAL ORTHOGRAPHIÉS"
-                for i, error in enumerate(weekday_errors, 1):
-                    weekday_errors_info += f"{i}. ERREUR D'ORTHOGRAPHE: '{error['text']}' devrait être '{error['correction']}'\n"
-        
-        # Reminder spécifique pour ne pas recommander inutilement d'ajouter une adresse ou un numéro de téléphone
-        prompt_reminder = """
+        non_transformed_products = False
+        products_list = []
+
+        # Liste complète des mentions légales nutritionnelles PNNS à surveiller
+        pnns_mentions = [
+            "mangerbouger.fr",
+            "pour votre santé, mangez au moins cinq fruits et légumes par jour",
+            "pour votre santé, évitez de manger trop gras, trop sucré, trop salé",
+            "pour votre santé, pratiquez une activité physique régulière",
+            "pour votre santé, évitez de grignoter entre les repas",
+            "pour votre santé, évitez de consommer trop de sel",
+            "pour votre santé, limitez les produits sucrés",
+            "pour votre santé, limitez les produits gras",
+            "pour votre santé, limitez les produits salés",
+            "pour votre santé, limitez la consommation d'alcool"
+        ]
+
+        # Texte à analyser pour la mention et les produits : raw_text si possible, sinon vision_result
+        texte_a_analyser = raw_text if raw_text and not raw_text.startswith('ERREUR') else vision_result if vision_result else ""
+
+        # Vérifier la présence d'au moins une mention PNNS dans le texte analysé
+        mentions_pnns_trouvees = [m for m in pnns_mentions if m in texte_a_analyser.lower()]
+        mention_pnns_presente = len(mentions_pnns_trouvees) > 0
+
+        # Détection des produits transformés et non transformés
+        produits_transformes = False
+        tous_non_transformes = False
+        produits_detectes = []
+        if hasattr(self, 'logo_product_matcher') and texte_a_analyser:
+            products = self.logo_product_matcher.extract_products_from_text(texte_a_analyser)
+            produits_detectes = products
+            if products:
+                tous_non_transformes = self.logo_product_matcher.is_non_transformed_product(products)
+                # On considère qu'il y a des produits transformés si la liste n'est pas tous non transformés
+                produits_transformes = not tous_non_transformes
+
+        # Liste des non-conformités spécifiques à ajouter
+        non_conformites = []
+        # Cas 1 : au moins un produit transformé, mention PNNS absente
+        if produits_transformes and not mention_pnns_presente:
+            non_conformites.append(
+                "Absence de mention légale nutritionnelle obligatoire (PNNS) alors que des produits transformés sont présents."
+            )
+        # Cas 2 : tous non transformés, mention PNNS présente
+        if tous_non_transformes and mention_pnns_presente:
+            produits_str = ", ".join(produits_detectes) if produits_detectes else "(non détectés)"
+            non_conformites.append(
+                f"Non-conformité : la mention légale nutritionnelle (PNNS) est présente alors qu'aucun produit transformé n'est détecté (ex : {produits_str}). Cette mention ne doit pas figurer pour des produits non transformés."
+            )
+        # Cas 3 : mixte (au moins un transformé et un non transformé), la mention PNNS est obligatoire, ne pas signaler la présence
+        # (déjà couvert par la logique ci-dessus)
+
+        # Vérification de la présence du numéro RCS et du site internet dans le texte analysé
+        rcs_present = bool(re.search(r"\bRCS\b", texte_a_analyser, re.IGNORECASE))
+        site_present = bool(re.search(r"\bhttps?://|www\.[a-z0-9\-]+\.[a-z]{2,}\b", texte_a_analyser, re.IGNORECASE))
+        # Exclure www.mangerbouger.fr du site internet de l'entreprise
+        site_present = site_present and not re.search(r"www\.mangerbouger\.fr", texte_a_analyser, re.IGNORECASE)
+        # Signaler explicitement l'absence de RCS et/ou de site internet
+        if not rcs_present:
+            non_conformites.append("Absence de numéro RCS : la publicité doit comporter le numéro RCS de l'entreprise.")
+        if not site_present:
+            non_conformites.append("Absence de site internet de l'entreprise : aucun site internet spécifique à l'annonceur n'est mentionné.")
+
+        # --- Point d'entrée pour la vérification avancée via RAG ---
+        if legislation_result:
+            rag_non_conformities = self.check_rag_legislation(legislation_result, texte_a_analyser, produits_detectes)
+            non_conformites.extend(rag_non_conformities)
+        # --- Fin point d'entrée RAG ---
+
+        # Prompt de base pour l'analyse de conformité
+        prompt = f"""Analyse complète de la conformité de cette publicité selon la législation publicitaire:
+
+DONNÉES D'ANALYSE VISUELLE:
+{vision_result}
+
+VÉRIFICATION DE COHÉRENCE:
+{consistency_result}
+
+LÉGISLATION APPLICABLE:
+{legislation_result}
+
+ANALYSE DE COHÉRENCE PRODUIT/LOGO:
+{product_logo_analysis}
+
+{date_info}
+{price_errors_info}
+{weekday_errors_info}
+
+TEXTE BRUT EXTRAIT:
+{raw_text if raw_text else "Non disponible"}
+
+{price_errors_summary}
+{date_errors_summary}
+{weekday_errors_summary}
+
 RAPPEL IMPORTANT:
 - NE PAS recommander inutilement d'ajouter une adresse pour l'établissement si ce n'est pas obligatoire
 - L'adresse de l'établissement N'EST PAS OBLIGATOIRE pour les publicités standards
@@ -802,6 +943,25 @@ RAPPEL IMPORTANT:
   * "Le Porc Français" pour des produits qui ne sont pas du porc = NON-CONFORMITÉ MAJEURE 
   * "Le Bœuf Français" pour des produits qui ne sont pas du bœuf = NON-CONFORMITÉ MAJEURE
   * Toute incohérence entre l'origine déclarée et le type de produit = NON-CONFORMITÉ MAJEURE
+- POUR LES DATES:
+  * NE PAS recommander d'ajouter l'année aux dates - ce n'est PAS nécessaire
+  * Pour vérifier la cohérence des dates sans année mentionnée, utiliser l'année en cours (2025)
+  * Vérifier UNIQUEMENT la cohérence entre jour de la semaine et date (ex: si "Vendredi 12/05" est cohérent en 2025)
+  * NE PAS considérer l'absence d'année dans une date comme une non-conformité
+"""
+
+        # Initialiser la variable prompt_reminder
+        prompt_reminder = ""
+
+        # Ajouter l'information sur les produits non transformés si détectés
+        if non_transformed_products:
+            produits_detectes = ", ".join(products_list)
+            prompt_reminder += f"""
+INFORMATION CRITIQUE SUR LES PRODUITS NON TRANSFORMÉS:
+- Des produits non transformés ont été détectés: {produits_detectes}
+- Les produits non transformés (viande fraîche, poisson frais, fruits et légumes frais) sont EXEMPTÉS de la mention www.mangerbouger.fr
+- NE PAS signaler l'absence de mention www.mangerbouger.fr comme une non-conformité
+- NE PAS recommander d'ajouter la mention www.mangerbouger.fr dans ce cas
 """
         
         # RAPPEL CRITIQUE concernant les erreurs de prix
@@ -809,24 +969,30 @@ RAPPEL IMPORTANT:
             prompt_reminder += """
 RAPPEL CRITIQUE SUR LES PRIX:
 - CONSIDÉRER COMME NON-CONFORMITÉ MAJEURE tout prix après réduction supérieur au prix initial
-- INCLURE OBLIGATOIREMENT les erreurs de prix dans la liste des éléments à corriger
-- CHANGER LE VERDICT en "NON CONFORME" en cas d'erreur de prix, quelle que soit les autres conformités
-- UTILISER UN TON ALARMANT pour décrire cette non-conformité dans votre réponse
+- INCLURE OBLIGATOIREMENT les erreurs de prix détectées dans la liste des non-conformités
+- EXPLIQUER avec précision le calcul correct qui aurait dû être fait
 """
         
-        # Rappel concernant les images de mauvaise qualité
-        if low_quality_image:
+        # RAPPEL CRITIQUE concernant les erreurs de jours/dates
+        if weekday_errors_info or date_info:
             prompt_reminder += """
-RAPPEL CRITIQUE SUR LA QUALITÉ DE L'IMAGE:
-- SIGNALER EXPLICITEMENT dès le début du rapport que l'image est de MAUVAISE QUALITÉ ou ILLISIBLE
-- INDIQUER que cette mauvaise qualité EMPÊCHE UNE ANALYSE COMPLÈTE et fiable
-- MENTIONNER que cela peut masquer des non-conformités importantes
-- CONSIDÉRER cette mauvaise qualité comme une NON-CONFORMITÉ en soi
+RAPPEL CRITIQUE SUR LES DATES:
+- CONSIDÉRER COMME NON-CONFORMITÉ MAJEURE toute incohérence entre date et jour de la semaine
+- INCLURE OBLIGATOIREMENT les erreurs de dates détectées dans la liste des non-conformités
+- SPÉCIFIER le jour correct qui correspond à chaque date mentionnée
+- VÉRIFIER LA COHÉRENCE avec l'année en cours (2025) pour les dates sans année
+- NE PAS recommander d'ajouter l'année aux dates - ce n'est PAS nécessaire
 """
         
-        # Intégrer les rappels dans le prompt
-        enhanced_description = self.vision_result + product_logo_info + price_errors_info + weekday_errors_info
-        prompt = legal_prompt.format(description=enhanced_description) + prompt_reminder
+        prompt += prompt_reminder
+        
+        # Ajouter les non-conformités spécifiques dans le prompt final
+        if non_conformites:
+            prompt += "\n\nNON-CONFORMITÉS SPÉCIFIQUES DÉTECTÉES :\n"
+            for nc in non_conformites:
+                prompt += f"- {nc}\n"
+        
+        # Utiliser le LLM pour analyser la conformité
         response = self.llm.complete(prompt)
         result = str(response)
         
@@ -834,115 +1000,13 @@ RAPPEL CRITIQUE SUR LA QUALITÉ DE L'IMAGE:
         if result.startswith("assistant:"):
             result = result[len("assistant:"):].strip()
         
-        # Créer un résumé des erreurs critiques pour le mettre au début du rapport
-        critical_issues = []
-        
-        # Ajouter l'alerte de mauvaise qualité d'image en priorité
-        if low_quality_image:
-            critical_issues.append("⚠️ IMAGE DE MAUVAISE QUALITÉ / ILLISIBLE - ANALYSE LIMITÉE")
-            
-        if product_logo_summary:
-            critical_issues.append(product_logo_summary)
-        if price_errors_summary:
-            critical_issues.append(price_errors_summary)
-        if weekday_errors_summary:
-            critical_issues.append(weekday_errors_summary)
-        
-        # Vérifier les non-conformités majeures dans le résultat
-        if "NON CONFORME" in result and not any(issue in result for issue in critical_issues):
-            critical_issues.append("⚠️ NON-CONFORMITÉ MAJEURE DÉTECTÉE")
-        
-        # Vérifier les problèmes d'astérisques sans renvoi
-        if "astérisque" in result.lower() and "sans renvoi" in result.lower():
-            critical_issues.append("⚠️ ASTÉRISQUES SANS RENVOI DÉTECTÉS")
-            
-        # Vérifier les problèmes d'origine des produits
-        has_origin_issue = False
-        if "origine incompatible" in result.lower() or "origine incohérente" in result.lower():
-            has_origin_issue = True
-        if "peche" in result.lower() and "viande" in result.lower():
-            has_origin_issue = True
-        if "porc francais" in result.lower() and "boeuf" in result.lower():
-            has_origin_issue = True
-        if "boeuf francais" in result.lower() and "porc" in result.lower():
-            has_origin_issue = True
-        
-        if has_origin_issue:
-            critical_issues.append("⚠️ INCOHÉRENCE D'ORIGINE DES PRODUITS DÉTECTÉE")
-        
-        # Ajouter un résumé des erreurs critiques au début du rapport si nécessaire
-        if critical_issues:
-            summary = "\n".join(critical_issues)
-            result = f"""
-=============================================
-RÉSUMÉ DES ERREURS CRITIQUES DÉTECTÉES
-=============================================
-{summary}
-=============================================
-
-{result}"""
-        
-        # Si l'image est de mauvaise qualité, s'assurer que c'est bien mentionné au début
-        if low_quality_image and "mauvaise qualité" not in result[:300].lower():
-            quality_warning = "\n⚠️ ALERTE: L'image analysée est de MAUVAISE QUALITÉ ou PARTIELLEMENT ILLISIBLE. Cette situation peut empêcher une analyse complète et fiable du contenu publicitaire. Certaines non-conformités pourraient ne pas être détectées en raison de la qualité insuffisante du visuel.\n\n"
-            result = quality_warning + result
-        
-        # Si des incohérences produit/logo ont été détectées, s'assurer qu'elles sont mentionnées dans la réponse finale
-        if hasattr(self, 'product_logo_inconsistencies') and self.product_logo_inconsistencies and "incohérence" not in result.lower():
-            result = "ALERTE INCOHÉRENCE PRODUIT/LOGO : Des incohérences ont été détectées entre les logos et les produits mentionnés dans la publicité. Voir détails ci-dessous.\n\n" + result
-        
-        # Si des erreurs de prix ont été détectées, s'assurer qu'elles sont mentionnées dans la réponse finale
-        if price_errors_info and not any(["prix supérieur" in result.lower(), "prix réduit supérieur" in result.lower()]):
-            price_errors_alert = "\n\nALERTE CRITIQUE - ERREURS DE PRIX : Des prix après réduction supérieurs aux prix initiaux ont été détectés. Ceci constitue une NON-CONFORMITÉ MAJEURE. Voir détails ci-dessous.\n\n"
-            if "NON CONFORME" not in result:
-                # Si le verdict n'est pas déjà NON CONFORME, l'ajouter
-                result = result.replace("VERDICT : CONFORME", "VERDICT : NON CONFORME")
-                result = result.replace("VERDICT: CONFORME", "VERDICT: NON CONFORME")
-                result = result.replace("VERDICT:CONFORME", "VERDICT:NON CONFORME")
-                result = result.replace("VERDICT : PARTIELLEMENT CONFORME", "VERDICT : NON CONFORME")
-                result = result.replace("VERDICT: PARTIELLEMENT CONFORME", "VERDICT: NON CONFORME")
-                result = result.replace("VERDICT:PARTIELLEMENT CONFORME", "VERDICT:NON CONFORME")
-                
-            result = price_errors_alert + result
-            
-        # Si des erreurs d'orthographe dans les jours ont été détectées, s'assurer qu'elles sont mentionnées
-        if weekday_errors_info and "jour" not in result.lower():
-            weekday_errors_alert = "\n\nALERTE - ORTHOGRAPHE INCORRECTE DES JOURS : Des jours de la semaine mal orthographiés ont été détectés (par exemple 'Venredi' au lieu de 'Vendredi'). Voir détails ci-dessous.\n\n"
-            result = weekday_errors_alert + result
-        
-        # Supprimer la section RECOMMANDATIONS du rapport final
-        recommendation_patterns = [
-            r'RECOMMANDATIONS\s*:?\s*\n[^\n]*(?:\n[^\n]*)*?(?=\n\n|\n[A-Z]+|\Z)',
-            r"PROPOSITIONS D'AMÉLIORATION\s*:?\s*\n[^\n]*(?:\n[^\n]*)*?(?=\n\n|\n[A-Z]+|\Z)",
-            r'AMÉLIORATIONS SUGGÉRÉES\s*:?\s*\n[^\n]*(?:\n[^\n]*)*?(?=\n\n|\n[A-Z]+|\Z)',
-            r'SUGGESTIONS\s*:?\s*\n[^\n]*(?:\n[^\n]*)*?(?=\n\n|\n[A-Z]+|\Z)'
-        ]
-        
-        for pattern in recommendation_patterns:
-            result = re.sub(pattern, '', result)
-        
-        # Vérifier si une recommandation d'ajout d'adresse ou de téléphone est présente malgré les instructions
-        address_phone_recommendations = [
-            "ajouter l'adresse",
-            "ajouter adresse",
-            "inclure l'adresse",
-            "inclure adresse",
-            "mentionner l'adresse",
-            "mentionner adresse",
-            "indiquer l'adresse",
-            "indiquer adresse",
-            "ajouter le numéro de téléphone",
-            "ajouter numéro",
-            "inclure le numéro de téléphone",
-            "mentionner le numéro de téléphone"
-        ]
-        
-        if any(rec in result.lower() for rec in address_phone_recommendations):
-            # Ajouter un avertissement concernant l'adresse et le téléphone
-            address_phone_warning = "\n\n⚠️ ATTENTION : Il n'est généralement pas nécessaire d'ajouter l'adresse de l'établissement ou un numéro de téléphone. Ces éléments NE SONT PAS OBLIGATOIRES pour les publicités standards, sauf cas particuliers prévus par la loi.\n\n"
-            result = result + address_phone_warning
-        
-        self.output_saver.save_compliance_analysis(result)
+        # Sauvegarder le résultat
+        if hasattr(self, 'output_saver'):
+            try:
+                self.output_saver.save_output('compliance_analysis', result)
+            except AttributeError:
+                # Utiliser une autre méthode de sauvegarde si save_output n'existe pas
+                self.output_saver.save_compliance_analysis(result)
         
         return result
 
@@ -1005,61 +1069,23 @@ RÉSUMÉ DES ERREURS CRITIQUES DÉTECTÉES
 
     def extract_raw_text_with_vision(self, image_path: str) -> str:
         """
-        Utilise GPT Vision pour extraire le texte brut d'une image sans aucune correction orthographique
-        
+        Extrait le texte brut d'une image en utilisant un fallback OCR robuste (Tesseract/EasyOCR)
         Args:
-            image_path: Chemin vers l'image à analyser
-            
+            image_path: Chemin de l'image
         Returns:
             str: Texte brut extrait
         """
-        print(f"\n🔍 Extraction de texte brut avec GPT Vision: {image_path}")
-        
-        # Vérifier que l'image existe
-        if not os.path.exists(image_path):
-            print(f"❌ Image non trouvée: {image_path}")
-            return ""
-        
-        # Charger l'image en base64
-        with open(image_path, "rb") as image_file:
-            img_data = base64.b64encode(image_file.read())
-        
-        # Créer le document d'image
-        image_document = Document(image_resource=MediaResource(data=img_data))
-        
-        # Créer un message multimodal avec l'image et la demande d'extraction de texte brut
-        msg = ChatMessage(
-            role=MessageRole.USER,
-            blocks=[
-                TextBlock(text=raw_text_extraction_prompt),
-                ImageBlock(image=image_document.image_resource.data),
-            ],
-        )
-        
-        # Envoyer la demande à GPT Vision
+        print(f"\n📝 Extraction du texte brut pour l'agent (fallback OCR): {image_path}")
         try:
-            response = self.llm.chat(messages=[msg])
-            extracted_text = str(response)
-            
-            # Supprimer le préfixe "assistant:" s'il est présent
-            if extracted_text.startswith("assistant:"):
-                extracted_text = extracted_text[len("assistant:"):].strip()
-            
-            # Sauvegarder le résultat
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_dir = Path("outputs") / "raw_text"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            output_file = output_dir / f"{Path(image_path).stem}_gpt_vision_{timestamp}.txt"
-            
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(extracted_text)
-            
-            print(f"💾 Texte brut sauvegardé: {output_file}")
-            
-            return extracted_text
-            
+            # Utiliser l'OCR local (Tesseract/EasyOCR) avec fallback
+            raw_text = self.text_extractor.extract_text(image_path, fallback=True)
+            if raw_text:
+                print("\n💾 Texte brut sauvegardé dans le fichier JSON principal")
+                return raw_text
+            else:
+                return "Aucun texte extrait"
         except Exception as e:
-            print(f"❌ Erreur lors de l'extraction de texte avec GPT Vision: {str(e)}")
+            print(f"❌ Erreur lors de l'extraction de texte brut: {str(e)}")
             return f"ERREUR: {str(e)}"
 
     def extract_raw_text_for_agent(self, image_path: str) -> str:
@@ -1297,3 +1323,57 @@ RÉSUMÉ DES ERREURS CRITIQUES DÉTECTÉES
             print("✅ Aucune incohérence de prix détectée")
             
         return price_errors 
+
+    def check_rag_legislation(self, legislation_text, ad_text, products):
+        """
+        Analyse la législation extraite du RAG et détecte les non-conformités spécifiques enrichies.
+        Args:
+            legislation_text (str): Texte de la législation extraite (RAG)
+            ad_text (str): Texte de la publicité à analyser
+            products (list): Liste des produits détectés
+        Returns:
+            list: Liste de non-conformités détectées
+        """
+        non_conformities = []
+        if not legislation_text or not ad_text:
+            return non_conformities
+
+        import re
+
+        # 1. Mentions obligatoires globales
+        mentions_obligatoires = re.findall(r"mention obligatoire ?: ([^\n\r]+)", legislation_text, re.IGNORECASE)
+        for mention in mentions_obligatoires:
+            if mention.lower() not in ad_text.lower():
+                non_conformities.append(f"Mention légale obligatoire absente : '{mention}'")
+
+        # 2. Mentions interdites globales
+        mentions_interdites = re.findall(r"mention interdite ?: ([^\n\r]+)", legislation_text, re.IGNORECASE)
+        for mention in mentions_interdites:
+            if mention.lower() in ad_text.lower():
+                non_conformities.append(f"Mention légale interdite présente : '{mention}'")
+
+        # 3. Mentions obligatoires conditionnelles par produit
+        # Exemple de pattern : "mention obligatoire pour (.+) : (.+)"
+        cond_obligatoires = re.findall(r"mention obligatoire pour ([^:]+) ?: ([^\n\r]+)", legislation_text, re.IGNORECASE)
+        for condition, mention in cond_obligatoires:
+            for prod in products:
+                if condition.lower() in prod.lower() and mention.lower() not in ad_text.lower():
+                    non_conformities.append(f"Mention obligatoire pour '{condition}' absente alors que le produit '{prod}' est présent : '{mention}'")
+
+        # 4. Mentions interdites conditionnelles par produit
+        cond_interdites = re.findall(r"mention interdite pour ([^:]+) ?: ([^\n\r]+)", legislation_text, re.IGNORECASE)
+        for condition, mention in cond_interdites:
+            for prod in products:
+                if condition.lower() in prod.lower() and mention.lower() in ad_text.lower():
+                    non_conformities.append(f"Mention interdite pour '{condition}' présente alors que le produit '{prod}' est présent : '{mention}'")
+
+        # 5. Mentions à formuler exactement
+        exact_mentions = re.findall(r"mention exacte ?: ([^\n\r]+)", legislation_text, re.IGNORECASE)
+        for mention in exact_mentions:
+            if mention.lower() not in ad_text.lower():
+                non_conformities.append(f"La mention obligatoire doit être formulée exactement ainsi : '{mention}'")
+
+        # 6. (Extension possible : position, taille, couleur, etc. à partir de la vision)
+        # À implémenter selon les besoins et les capacités de la vision
+
+        return non_conformities 

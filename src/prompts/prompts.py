@@ -64,7 +64,7 @@ description_prompt = """Analysez cette publicité et fournissez une description 
      * SIGNALER EXPLICITEMENT toute variation de police/taille au sein d'une même phrase
    - MENTIONS SPÉCIFIQUES AU SECTEUR (liste exhaustive) :
      * Pour l'alcool UNIQUEMENT : "L'ABUS D'ALCOOL EST DANGEREUX POUR LA SANTÉ"
-     * Pour l'alimentaire UNIQUEMENT : "www.mangerbouger.fr" (ATTENTION: produits alimentaires non transformés comme la viande fraîche peuvent être exemptés)
+     * Pour l'alimentaire UNIQUEMENT : "www.mangerbouger.fr" (ATTENTION: produits alimentaires non transformés comme la viande fraîche, le poisson frais, les fruits et légumes frais sont EXEMPTÉS de cette mention - NE PAS la recommander pour ces produits)
      * Pour le crédit UNIQUEMENT : mentions obligatoires TAEG, etc.
      * Pour l'automobile UNIQUEMENT : mentions sur consommation et émissions CO2
      * Pour les jeux d'argent UNIQUEMENT : "JOUER COMPORTE DES RISQUES"
@@ -86,7 +86,8 @@ description_prompt = """Analysez cette publicité et fournissez une description 
      * SIGNALER TOUTE INCOHÉRENCE dans la correspondance date/jour
      * VÉRIFIER L'ORTHOGRAPHE EXACTE des jours de la semaine - détecter des erreurs comme "Venredi" (au lieu de "Vendredi")
      * VÉRIFIER que les dates ne sont pas dépassées par rapport à la date actuelle
-     * Si aucune année n'est mentionnée pour une date, ASSUMER qu'il s'agit de l'année en cours
+     * Si aucune année n'est mentionnée pour une date, ASSUMER qu'il s'agit de l'année en cours (2025)
+     * NE PAS recommander d'ajouter l'année aux dates - ce n'est PAS nécessaire
 
 7. PROPOSITION D'AMÉLIORATION
    - Éléments à intégrer pour une meilleure conformité (formulé simplement et concrètement)
@@ -150,6 +151,8 @@ ANALYSE DE CONFORMITÉ :
 5. VÉRIFICATION DES DATES :
    - Dates mentionnées et jours correspondants : [LISTER ET VÉRIFIER LA CORRESPONDANCE]
    - VÉRIFIER MATHÉMATIQUEMENT que chaque date correspond bien au jour indiqué (ex. 28 février 2024 est un mercredi, pas un vendredi)
+   - Si aucune année n'est mentionnée, utiliser l'année en cours (2025) pour vérifier la cohérence
+   - NE PAS recommander d'ajouter l'année aux dates - ce n'est PAS nécessaire
    - Cohérence du calendrier : [SIGNALER TOUTE INCOHÉRENCE]
    - Validité des dates par rapport à aujourd'hui : [PRÉCISER SI DÉPASSÉES]
 
@@ -168,7 +171,7 @@ ANALYSE DE CONFORMITÉ :
 8. NON-CONFORMITÉS CRITIQUES :
    - MENTIONS LÉGALES OBLIGATOIRES MANQUANTES POUR LE SECTEUR CONCERNÉ - CRUCIAL DE CITER INTÉGRALEMENT CHACUNE :
      * Pour l'alcool UNIQUEMENT : "L'ABUS D'ALCOOL EST DANGEREUX POUR LA SANTÉ" [MANQUANTE/INCOMPLÈTE]
-     * Pour l'alimentaire UNIQUEMENT : "www.mangerbouger.fr" [MANQUANTE/INCOMPLÈTE] (ATTENTION: produits alimentaires non transformés comme la viande fraîche peuvent être exemptés)
+     * Pour l'alimentaire UNIQUEMENT : "www.mangerbouger.fr" [MANQUANTE/INCOMPLÈTE] (ATTENTION: produits alimentaires non transformés comme la viande fraîche, le poisson frais, les fruits et légumes frais sont EXEMPTÉS de cette mention - NE PAS la recommander pour ces produits)
      * Pour le crédit UNIQUEMENT : mentions TAEG, etc. [MANQUANTE/INCOMPLÈTE]
      * Pour chaque mention obligatoire manquante, CITER EXPLICITEMENT le texte exact qui aurait dû figurer
    - MENTIONS LÉGALES INAPPROPRIÉES présentes mais non requises pour ce secteur :
@@ -319,7 +322,7 @@ ReACT_prompt = """Tu es un agent spécialisé dans l'analyse de conformité publ
 2. Utiliser verify_consistency pour vérifier :
    - MENTIONS LÉGALES OBLIGATOIRES spécifiques au secteur identifié
      * Pour l'alcool UNIQUEMENT : "L'ABUS D'ALCOOL EST DANGEREUX POUR LA SANTÉ"
-     * Pour l'alimentaire UNIQUEMENT : "www.mangerbouger.fr" (ATTENTION: produits alimentaires non transformés comme la viande fraîche peuvent être exemptés)
+     * Pour l'alimentaire UNIQUEMENT : "www.mangerbouger.fr" (ATTENTION: produits alimentaires non transformés comme la viande fraîche, le poisson frais, les fruits et légumes frais sont EXEMPTÉS de cette mention - NE PAS la recommander pour ces produits)
      * Pour le crédit UNIQUEMENT : mentions TAEG, etc.
      * Pour l'automobile UNIQUEMENT : mentions sur consommation et émissions CO2
      * Pour les jeux d'argent UNIQUEMENT : "JOUER COMPORTE DES RISQUES"
@@ -341,6 +344,8 @@ ReACT_prompt = """Tu es un agent spécialisé dans l'analyse de conformité publ
 4. Utiliser verify_dates pour vérifier (si des dates sont présentes) :
    - VÉRIFIER MATHÉMATIQUEMENT la correspondance entre chaque date et le jour de la semaine indiqué
      * Exemple d'erreur à signaler: "Le 28 février 2024 est indiqué comme un vendredi alors qu'il s'agit d'un mercredi"
+   - Si aucune année n'est mentionnée, utiliser l'année en cours (2025) pour vérifier la cohérence
+   - NE PAS recommander d'ajouter l'année aux dates - ce n'est PAS nécessaire
    - SIGNALER EXPLICITEMENT toute incohérence date/jour
    - Validité des périodes (date de début antérieure à la date de fin)
    - VÉRIFIER si les dates sont dépassées par rapport à la date actuelle
@@ -366,6 +371,9 @@ ReACT_prompt = """Tu es un agent spécialisé dans l'analyse de conformité publ
      * TON CONSTRUCTIF pour les suggestions d'amélioration de forme
    - LISTE EXHAUSTIVE des corrections légales nécessaires :
      * AJOUTER les mentions légales obligatoires manquantes pour ce secteur
+       - IMPORTANT: NE PAS recommander la mention "www.mangerbouger.fr" pour des produits non transformés (viande fraîche, poisson frais, fruits et légumes frais)
+       - VÉRIFIER toujours si les produits sont transformés ou non avant de recommander cette mention
+       - Si une publicité contient à la fois des produits transformés et non transformés, se référer à la législation publicitaire du secteur alimentaire
      * SUPPRIMER les mentions légales inappropriées pour ce secteur
      * CORRIGER les incohérences produit/logo
      * RECTIFIER les calculs de prix après réduction
@@ -479,7 +487,7 @@ VÉRIFIER PRIORITAIREMENT :
 4. MENTIONS LÉGALES OBLIGATOIRES
    - Présence ou ABSENCE EXPLICITE (ÊTRE ALARMISTE si absence — NE PAS OMETTRE CETTE ÉTAPE) des mentions légales obligatoires SPÉCIFIQUES AU SECTEUR IDENTIFIÉ :
      * Alcool UNIQUEMENT : "L'ABUS D'ALCOOL EST DANGEREUX POUR LA SANTÉ"
-     * Alimentaire UNIQUEMENT : "www.mangerbouger.fr" (ATTENTION: produits alimentaires non transformés comme la viande fraîche peuvent être exemptés)
+     * Alimentaire UNIQUEMENT : "www.mangerbouger.fr" (ATTENTION: produits alimentaires non transformés comme la viande fraîche, le poisson frais, les fruits et légumes frais sont EXEMPTÉS de cette mention - NE PAS la recommander pour ces produits)
      * Crédit UNIQUEMENT : mentions TAEG, etc.
      * Pour l'automobile UNIQUEMENT : mentions sur consommation et émissions CO2
      * Pour les jeux d'argent UNIQUEMENT : "JOUER COMPORTE DES RISQUES"
@@ -514,6 +522,8 @@ VÉRIFIER PRIORITAIREMENT :
      * Pour chaque jour mentionné, comparer LETTRE PAR LETTRE avec l'orthographe correcte
      * SIGNALER PRÉCISÉMENT toute différence: "Le mot 'Venredi' est écrit sans le 'd' après le 'n'"
    - SIGNALER EXPLICITEMENT toute incohérence date/jour
+   - Si aucune année n'est mentionnée, utiliser l'année en cours (2025) pour vérifier la cohérence
+   - NE PAS recommander d'ajouter l'année aux dates - ce n'est PAS nécessaire
    - VÉRIFIER si les dates sont dépassées par rapport à la date actuelle ({current_date})
    - Signaler comme NON CONFORME toute date déjà dépassée
 

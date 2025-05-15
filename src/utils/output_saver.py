@@ -116,20 +116,8 @@ class OutputSaver:
         self.current_analysis["raw_text"] = result
         self._save_current_analysis()
         
-        # Créer un dossier spécifique pour les textes bruts
-        raw_text_dir = self.output_dir / "raw_text"
-        raw_text_dir.mkdir(exist_ok=True)
-        
-        # Sauvegarder dans un fichier texte séparé
-        if self.current_analysis["image_path"]:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{Path(self.current_analysis['image_path']).stem}_raw_{timestamp}.txt"
-            output_path = raw_text_dir / filename
-            
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(result)
-                
-            print(f"\n💾 Texte brut sauvegardé séparément dans : {output_path}")
+        # Message uniquement, sans création de fichier texte séparé
+        print("\n💾 Texte brut sauvegardé dans le fichier JSON principal")
         
         return
     
@@ -143,20 +131,8 @@ class OutputSaver:
         self.current_analysis["dates_verification"] = result
         self._save_current_analysis()
         
-        # Créer un dossier spécifique pour les vérifications de dates
-        dates_dir = self.output_dir / "dates_verification"
-        dates_dir.mkdir(exist_ok=True)
-        
-        # Sauvegarder dans un fichier texte séparé
-        if self.current_analysis["image_path"]:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{Path(self.current_analysis['image_path']).stem}_dates_{timestamp}.txt"
-            output_path = dates_dir / filename
-            
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(result)
-                
-            print(f"\n💾 Vérification des dates sauvegardée séparément dans : {output_path}")
+        # Ne pas créer de fichier texte séparé, juste sauvegarder dans le JSON principal
+        print("\n💾 Vérification des dates sauvegardée dans le fichier JSON principal")
     
     def save_product_logo_consistency(self, result: str) -> None:
         """Sauvegarde le résultat de la vérification de cohérence produit/logo"""
@@ -177,13 +153,30 @@ class OutputSaver:
         if not self.current_analysis["image_path"]:
             raise ValueError("Aucune analyse en cours")
             
+        # Ne pas sauvegarder les résultats intermédiaires, uniquement informer l'utilisateur
         filename = self._generate_filename(self.current_analysis["image_path"])
         output_path = self.output_dir / filename
         
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(self.current_analysis, f, ensure_ascii=False, indent=2)
-            
-        print(f"\n💾 Résultats sauvegardés dans : {output_path}")
+        # Afficher uniquement le message pour informer l'utilisateur, sans créer de fichier
+        print(f"\n💾 Donnée mise à jour: {output_path}")
+        
+        # Pas de sauvegarde réelle ici, on attend la fin de l'analyse complète
+
+    def save_output(self, key: str, result: Any) -> None:
+        """
+        Méthode générique pour sauvegarder n'importe quel résultat dans l'analyse en cours
+        
+        Args:
+            key: Clé du résultat (ex: 'dates_verification', 'compliance_analysis')
+            result: Résultat à sauvegarder
+        """
+        self.current_analysis[key] = result
+        self._save_current_analysis()
+        
+        # Informer l'utilisateur
+        print(f"\n💾 Sauvegarde de {key} effectuée")
+        
+        return
 
 def make_json_serializable(obj):
     """
@@ -232,12 +225,11 @@ def save_output(input_path: str, analysis_data: Dict[str, Any]) -> str:
     
     # Créer le répertoire de sortie
     base_output_dir = Path("outputs")
+    base_output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    source_dir = base_output_dir / input_file.stem
-    source_dir.mkdir(parents=True, exist_ok=True)
     
-    # Créer le nom du fichier de sortie
-    output_path = source_dir / f"analyse_{timestamp}.json"
+    # Créer le nom du fichier de sortie - un seul fichier JSON avec timestamp
+    output_path = base_output_dir / f"analyse_{input_file.stem}_{timestamp}.json"
     
     # Fonction pour rendre les données sérialisables en JSON
     def make_json_serializable(data):
@@ -275,12 +267,7 @@ def save_output(input_path: str, analysis_data: Dict[str, Any]) -> str:
     # Sauvegarder en JSON
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(clean_data, f, ensure_ascii=False, indent=2)
-        
-    # Copier l'image convertie si elle existe
-    if clean_data.get("converted_file"):
-        image_path = Path(clean_data["converted_file"])
-        if image_path.exists():
-            image_output = source_dir / f"image_{timestamp}{image_path.suffix}"
-            shutil.copy2(image_path, image_output)
+    
+    print(f"\n💾 Analyse complète sauvegardée dans : {output_path}")
             
-    return str(output_path.relative_to(base_output_dir.parent)) 
+    return str(output_path) 
