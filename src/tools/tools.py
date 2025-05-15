@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import calendar
+from agent.ad_analysis_agent import AdAnalysisAgent
 
 class Tools:
     """Collection des outils disponibles pour l'analyse de publicité"""
@@ -783,232 +784,17 @@ TEXTE BRUT DÉJÀ EXTRAIT:
         
         return result
 
-    def analyze_compliance(self, 
-                        vision_result: str = None, 
-                        consistency_result: str = None, 
-                        legislation_result: str = None,
-                        product_logo_analysis: str = None,
-                        dates_verification: dict = None,
-                        raw_text: str = None,
-                        **kwargs) -> str:
+    def analyze_compliance(self, image_path: str, **kwargs) -> str:
         """
-        Analyse la conformité de la publicité en fonction des différentes analyses
-        
+        Analyse la conformité de la publicité en utilisant l'orchestrateur centralisé AdAnalysisAgent
         Args:
-            vision_result: Résultat de l'analyse visuelle
-            consistency_result: Résultat de la vérification de cohérence
-            legislation_result: Résultat de la recherche de législation
-            product_logo_analysis: Résultat de l'analyse de cohérence produit/logo
-            dates_verification: Résultat de la vérification des dates (format dictionnaire)
-            raw_text: Texte brut extrait de l'image
-            
+            image_path: Chemin vers l'image à analyser
         Returns:
             str: Rapport de conformité
         """
-        
-        # Récupérer les résultats d'analyse précédents si non fournis
-        if not vision_result and hasattr(self, 'vision_result'):
-            vision_result = self.vision_result
-            
-        if not consistency_result and hasattr(self, 'consistency_result'):
-            consistency_result = self.consistency_result
-            
-        if not legislation_result and hasattr(self, 'legislation_result'):
-            legislation_result = self.legislation_result
-            
-        if not product_logo_analysis and hasattr(self, 'product_logo_analysis'):
-            product_logo_analysis = self.product_logo_analysis
-            
-        if not dates_verification and hasattr(self, 'weekday_errors'):
-            dates_verification = {
-                "weekday_errors": self.weekday_errors,
-                "total_errors": len(self.weekday_errors) if self.weekday_errors else 0
-            }
-            
-        if not raw_text and hasattr(self, 'raw_text'):
-            raw_text = self.raw_text
-            
-        # Initialiser toutes les variables utilisées dans le prompt pour éviter les erreurs Python
-        date_info = ""
-        price_errors_info = ""
-        weekday_errors_info = ""
-        price_errors_summary = ""
-        date_errors_summary = ""
-        weekday_errors_summary = ""
-        non_transformed_products = False
-        products_list = []
-
-        # Liste complète des mentions légales nutritionnelles PNNS à surveiller
-        pnns_mentions = [
-            "mangerbouger.fr",
-            "pour votre santé, mangez au moins cinq fruits et légumes par jour",
-            "pour votre santé, évitez de manger trop gras, trop sucré, trop salé",
-            "pour votre santé, pratiquez une activité physique régulière",
-            "pour votre santé, évitez de grignoter entre les repas",
-            "pour votre santé, évitez de consommer trop de sel",
-            "pour votre santé, limitez les produits sucrés",
-            "pour votre santé, limitez les produits gras",
-            "pour votre santé, limitez les produits salés",
-            "pour votre santé, limitez la consommation d'alcool"
-        ]
-
-        # Texte à analyser pour la mention et les produits : raw_text si possible, sinon vision_result
-        texte_a_analyser = raw_text if raw_text and not raw_text.startswith('ERREUR') else vision_result if vision_result else ""
-
-        # Vérifier la présence d'au moins une mention PNNS dans le texte analysé
-        mentions_pnns_trouvees = [m for m in pnns_mentions if m in texte_a_analyser.lower()]
-        mention_pnns_presente = len(mentions_pnns_trouvees) > 0
-
-        # Détection des produits transformés et non transformés
-        produits_transformes = False
-        tous_non_transformes = False
-        produits_detectes = []
-        if hasattr(self, 'logo_product_matcher') and texte_a_analyser:
-            products = self.logo_product_matcher.extract_products_from_text(texte_a_analyser)
-            produits_detectes = products
-            if products:
-                tous_non_transformes = self.logo_product_matcher.is_non_transformed_product(products)
-                # On considère qu'il y a des produits transformés si la liste n'est pas tous non transformés
-                produits_transformes = not tous_non_transformes
-
-        # Liste des non-conformités spécifiques à ajouter
-        non_conformites = []
-        # Cas 1 : au moins un produit transformé, mention PNNS absente
-        if produits_transformes and not mention_pnns_presente:
-            non_conformites.append(
-                "Absence de mention légale nutritionnelle obligatoire (PNNS) alors que des produits transformés sont présents."
-            )
-        # Cas 2 : tous non transformés, mention PNNS présente
-        if tous_non_transformes and mention_pnns_presente:
-            produits_str = ", ".join(produits_detectes) if produits_detectes else "(non détectés)"
-            non_conformites.append(
-                f"Non-conformité : la mention légale nutritionnelle (PNNS) est présente alors qu'aucun produit transformé n'est détecté (ex : {produits_str}). Cette mention ne doit pas figurer pour des produits non transformés."
-            )
-        # Cas 3 : mixte (au moins un transformé et un non transformé), la mention PNNS est obligatoire, ne pas signaler la présence
-        # (déjà couvert par la logique ci-dessus)
-
-        # Vérification de la présence du numéro RCS et du site internet dans le texte analysé
-        rcs_present = bool(re.search(r"\bRCS\b", texte_a_analyser, re.IGNORECASE))
-        site_present = bool(re.search(r"\bhttps?://|www\.[a-z0-9\-]+\.[a-z]{2,}\b", texte_a_analyser, re.IGNORECASE))
-        # Exclure www.mangerbouger.fr du site internet de l'entreprise
-        site_present = site_present and not re.search(r"www\.mangerbouger\.fr", texte_a_analyser, re.IGNORECASE)
-        # Signaler explicitement l'absence de RCS et/ou de site internet
-        if not rcs_present:
-            non_conformites.append("Absence de numéro RCS : la publicité doit comporter le numéro RCS de l'entreprise.")
-        if not site_present:
-            non_conformites.append("Absence de site internet de l'entreprise : aucun site internet spécifique à l'annonceur n'est mentionné.")
-
-        # --- Point d'entrée pour la vérification avancée via RAG ---
-        if legislation_result:
-            rag_non_conformities = self.check_rag_legislation(legislation_result, texte_a_analyser, produits_detectes)
-            non_conformites.extend(rag_non_conformities)
-        # --- Fin point d'entrée RAG ---
-
-        # Prompt de base pour l'analyse de conformité
-        prompt = f"""Analyse complète de la conformité de cette publicité selon la législation publicitaire:
-
-DONNÉES D'ANALYSE VISUELLE:
-{vision_result}
-
-VÉRIFICATION DE COHÉRENCE:
-{consistency_result}
-
-LÉGISLATION APPLICABLE:
-{legislation_result}
-
-ANALYSE DE COHÉRENCE PRODUIT/LOGO:
-{product_logo_analysis}
-
-{date_info}
-{price_errors_info}
-{weekday_errors_info}
-
-TEXTE BRUT EXTRAIT:
-{raw_text if raw_text else "Non disponible"}
-
-{price_errors_summary}
-{date_errors_summary}
-{weekday_errors_summary}
-
-RAPPEL IMPORTANT:
-- NE PAS recommander inutilement d'ajouter une adresse pour l'établissement si ce n'est pas obligatoire
-- L'adresse de l'établissement N'EST PAS OBLIGATOIRE pour les publicités standards
-- RETIRER toute recommandation d'ajout d'adresse qui ne soit pas légalement requise
-- LE NUMÉRO DE TÉLÉPHONE N'EST PAS OBLIGATOIRE pour les publicités standards
-- NE PAS inclure de section "RECOMMANDATIONS" dans le rapport final
-- Se concentrer UNIQUEMENT sur les non-conformités légales réelles
-- Pour les viandes, les étoiles (★,☆,✩,✪) indiquent la qualité de la viande et NE SONT PAS des astérisques nécessitant un renvoi
-- VÉRIFIER ATTENTIVEMENT les mentions d'origine des produits:
-  * "pêché en Loire Atlantique" ou similaire pour des produits de viande = NON-CONFORMITÉ MAJEURE
-  * "Le Porc Français" pour des produits qui ne sont pas du porc = NON-CONFORMITÉ MAJEURE 
-  * "Le Bœuf Français" pour des produits qui ne sont pas du bœuf = NON-CONFORMITÉ MAJEURE
-  * Toute incohérence entre l'origine déclarée et le type de produit = NON-CONFORMITÉ MAJEURE
-- POUR LES DATES:
-  * NE PAS recommander d'ajouter l'année aux dates - ce n'est PAS nécessaire
-  * Pour vérifier la cohérence des dates sans année mentionnée, utiliser l'année en cours (2025)
-  * Vérifier UNIQUEMENT la cohérence entre jour de la semaine et date (ex: si "Vendredi 12/05" est cohérent en 2025)
-  * NE PAS considérer l'absence d'année dans une date comme une non-conformité
-"""
-
-        # Initialiser la variable prompt_reminder
-        prompt_reminder = ""
-
-        # Ajouter l'information sur les produits non transformés si détectés
-        if non_transformed_products:
-            produits_detectes = ", ".join(products_list)
-            prompt_reminder += f"""
-INFORMATION CRITIQUE SUR LES PRODUITS NON TRANSFORMÉS:
-- Des produits non transformés ont été détectés: {produits_detectes}
-- Les produits non transformés (viande fraîche, poisson frais, fruits et légumes frais) sont EXEMPTÉS de la mention www.mangerbouger.fr
-- NE PAS signaler l'absence de mention www.mangerbouger.fr comme une non-conformité
-- NE PAS recommander d'ajouter la mention www.mangerbouger.fr dans ce cas
-"""
-        
-        # RAPPEL CRITIQUE concernant les erreurs de prix
-        if price_errors_info:
-            prompt_reminder += """
-RAPPEL CRITIQUE SUR LES PRIX:
-- CONSIDÉRER COMME NON-CONFORMITÉ MAJEURE tout prix après réduction supérieur au prix initial
-- INCLURE OBLIGATOIREMENT les erreurs de prix détectées dans la liste des non-conformités
-- EXPLIQUER avec précision le calcul correct qui aurait dû être fait
-"""
-        
-        # RAPPEL CRITIQUE concernant les erreurs de jours/dates
-        if weekday_errors_info or date_info:
-            prompt_reminder += """
-RAPPEL CRITIQUE SUR LES DATES:
-- CONSIDÉRER COMME NON-CONFORMITÉ MAJEURE toute incohérence entre date et jour de la semaine
-- INCLURE OBLIGATOIREMENT les erreurs de dates détectées dans la liste des non-conformités
-- SPÉCIFIER le jour correct qui correspond à chaque date mentionnée
-- VÉRIFIER LA COHÉRENCE avec l'année en cours (2025) pour les dates sans année
-- NE PAS recommander d'ajouter l'année aux dates - ce n'est PAS nécessaire
-"""
-        
-        prompt += prompt_reminder
-        
-        # Ajouter les non-conformités spécifiques dans le prompt final
-        if non_conformites:
-            prompt += "\n\nNON-CONFORMITÉS SPÉCIFIQUES DÉTECTÉES :\n"
-            for nc in non_conformites:
-                prompt += f"- {nc}\n"
-        
-        # Utiliser le LLM pour analyser la conformité
-        response = self.llm.complete(prompt)
-        result = str(response)
-        
-        # Supprimer le préfixe "assistant:" s'il est présent
-        if result.startswith("assistant:"):
-            result = result[len("assistant:"):].strip()
-        
-        # Sauvegarder le résultat
-        if hasattr(self, 'output_saver'):
-            try:
-                self.output_saver.save_output('compliance_analysis', result)
-            except AttributeError:
-                # Utiliser une autre méthode de sauvegarde si save_output n'existe pas
-                self.output_saver.save_compliance_analysis(result)
-        
-        return result
+        agent = AdAnalysisAgent()
+        result = agent.analyze(image_path)
+        return result["compliance"]
 
     def extract_text_from_image(self, image_path: str, mode: str = "docling", ocr_engine: str = "tesseract") -> str:
         """
